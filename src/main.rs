@@ -2,6 +2,15 @@
 
 use bevy::prelude::*;
 
+const THRUST: f64 = 1.0;
+const MG: f64 = 0.2;
+const CD0: f64 = 0.04;
+const DCD: f64 = 0.1;
+const CL0: f64 = 0.0;
+const DCL: f64 = 1.0;
+const DCMP: f64 = 1.0;
+const DELTA: f64 = 0.02;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -17,13 +26,16 @@ fn main() {
 struct Airplane;
 #[derive(Component)]
 struct Camera;
-#[derive(Component)]
+#[derive(Component, Debug)]
 struct RigidBody {
-    pub vx: f32,
-    pub vy: f32,
-    pub vz: f32,
+    pub vx: f64,
+    pub vy: f64,
+    pub x: f64,
+    pub y: f64,
+    // pub vz: f64,
+    pub omega_p: f64,
     // pub r: f32,
-    // pub p: f32,
+    pub p: f64,
     // pub y: f32,
 }
 
@@ -49,11 +61,14 @@ fn setup_airplane(
             },
             Airplane,
             RigidBody {
-                vx: 10.0,
-                vy: 0.1,
-                vz: 0.0,
+                vx: 0.0,
+                vy: 0.0,
+                x: 0.0,
+                y: 0.0,
+                // vz: 0.0,
+                omega_p: 0.0,
                 // r: 0.0,
-                // p: 0.0,
+                p: 0.0,
                 // y: 0.0,
             },
         ))
@@ -146,32 +161,85 @@ fn setup_world(
     ));
 }
 
-fn update_dynamics(time: Res<Time>, mut query: Query<&mut RigidBody, With<Airplane>>) {
+fn update_dynamics(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut RigidBody, With<Airplane>>,
+) {
     for mut rigid_body in &mut query {
-        let current_vx = rigid_body.vx;
-        let current_vz = rigid_body.vz;
-        rigid_body.vx += -current_vz * time.delta_seconds();
-        rigid_body.vz += current_vx * time.delta_seconds();
+        let mut t = 0.0;
+        if keys.pressed(KeyCode::Space) {
+            t += THRUST
+        }
+
+        let mut d = 0.0;
+        if keys.pressed(KeyCode::KeyW) {
+            d += DELTA;
+        } else if keys.pressed(KeyCode::KeyS) {
+            d -= DELTA;
+        }
+
+        let v2 = rigid_body.vx * rigid_body.vx + rigid_body.vy + rigid_body.vy;
+
+        let mut lift = 0.0;
+        let mut drag = 0.0;
+        let mut m_p = 0.0;
+        let mut alfa = 0.0;
+
+        if v2 > 0.0 {
+            let gamma = -(rigid_body.vy / v2.sqrt()).asin();
+            alfa = rigid_body.p + gamma;
+
+            lift = v2 / 2.0 * (CL0 + DCL * alfa);
+            drag = v2 / 2.0 * (CD0 + DCD * alfa);
+            m_p = -v2 / 2.0 * (DCMP * alfa + d);
+        }
+
+        let ax = t * alfa.cos() - drag * alfa.cos() + lift * alfa.sin();
+        let ay = t * alfa.sin() + drag * alfa.sin() + lift * alfa.cos() - MG;
+
+        let eps = m_p;
+
+        rigid_body.vx += ax * time.delta_seconds_f64();
+        rigid_body.vy += ay * time.delta_seconds_f64();
+
+        rigid_body.x += rigid_body.vx * time.delta_seconds_f64();
+        rigid_body.y += rigid_body.vy * time.delta_seconds_f64();
+
+        rigid_body.omega_p += eps * time.delta_seconds_f64();
+
+        rigid_body.p += rigid_body.omega_p * time.delta_seconds_f64();
+
+        if rigid_body.y < 5.0 {
+            rigid_body.y = 5.0;
+            rigid_body.vy = 0.0;
+        }
+
+        // println!(
+        //     "lift {}, drag {}, m_p {}, ax {}, ay {}, rigid_body {:?}",
+        //     lift, drag, m_p, ax, ay, rigid_body
+        // );
+
+        println!("{:?}", rigid_body);
     }
 }
 
 fn update_transform(
-    time: Res<Time>,
     mut query: Query<&mut Transform, With<Airplane>>,
     body_query: Query<&RigidBody, With<Airplane>>,
 ) {
     let body = body_query.single();
 
     for mut transform in &mut query {
-        transform.translation.x += body.vx * time.delta_seconds();
-        transform.translation.y += body.vy * time.delta_seconds();
-        transform.translation.z += body.vz * time.delta_seconds();
+        transform.translation.x = body.x as f32;
+        transform.translation.y = body.y as f32;
 
-        transform.rotate_y(-time.delta_seconds() / 1.5 * std::f32::consts::FRAC_PI_2);
-        transform.rotate_local_y(-time.delta_seconds() / 1.5 * std::f32::consts::FRAC_PI_2);
-        transform.rotate_local_z(
-            (time.elapsed_seconds() * std::f32::consts::FRAC_PI_2).cos() * time.delta_seconds(),
-        );
+        println!("{}", transform.rotation);
+
+        *transform = transform.with_rotation(
+            Quat::from_rotation_z(body.p as f32)
+                * Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2),
+        )
     }
 }
 
