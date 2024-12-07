@@ -2,14 +2,20 @@
 
 use bevy::prelude::*;
 
-const THRUST: f64 = 1.0;
-const MG: f64 = 0.2;
-const CD0: f64 = 0.04;
-const DCD: f64 = 0.1;
-const CL0: f64 = 0.0;
-const DCL: f64 = 1.0;
-const DCMP: f64 = 1.0;
-const DELTA: f64 = 0.02;
+const THRUST: f32 = 1.0;
+const MG: f32 = 0.2;
+const CD0: f32 = 0.04;
+const DCD: f32 = 0.1;
+const CL0: f32 = 0.0;
+const DCL: f32 = 1.0;
+const DCMP: f32 = 1.0;
+const DELTA: f32 = 0.02;
+const G: f32 = 9.81;
+const M: f32 = 1000.0;
+const I_X: f32 = 1.0;
+const I_Y: f32 = 1.0;
+const I_Z: f32 = 1.0;
+const I_XZ: f32 = 1.0;
 
 fn main() {
     App::new()
@@ -28,15 +34,19 @@ struct Airplane;
 struct Camera;
 #[derive(Component, Debug)]
 struct RigidBody {
-    pub vx: f64,
-    pub vy: f64,
-    pub x: f64,
-    pub y: f64,
-    // pub vz: f64,
-    pub omega_p: f64,
-    // pub r: f32,
-    pub p: f64,
-    // pub y: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub phi: f32,
+    pub theta: f32,
+    pub psi: f32,
+
+    pub u: f32,
+    pub v: f32,
+    pub w: f32,
+    pub p: f32,
+    pub q: f32,
+    pub r: f32,
 }
 
 fn setup_airplane(
@@ -61,15 +71,18 @@ fn setup_airplane(
             },
             Airplane,
             RigidBody {
-                vx: 0.0,
-                vy: 0.0,
                 x: 0.0,
                 y: 0.0,
-                // vz: 0.0,
-                omega_p: 0.0,
-                // r: 0.0,
+                z: 0.0,
+                phi: 0.0,
+                theta: 0.0,
+                psi: 0.0,
+                u: 0.0,
+                v: 0.0,
+                w: 0.0,
                 p: 0.0,
-                // y: 0.0,
+                q: 0.0,
+                r: 0.0,
             },
         ))
         .with_children(|parent| {
@@ -166,62 +179,89 @@ fn update_dynamics(
     keys: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut RigidBody, With<Airplane>>,
 ) {
-    for mut rigid_body in &mut query {
-        let mut t = 0.0;
-        if keys.pressed(KeyCode::Space) {
-            t += THRUST
-        }
-
-        let mut d = 0.0;
-        if keys.pressed(KeyCode::KeyW) {
-            d += DELTA;
-        } else if keys.pressed(KeyCode::KeyS) {
-            d -= DELTA;
-        }
-
-        let v2 = rigid_body.vx * rigid_body.vx + rigid_body.vy + rigid_body.vy;
-
-        let mut lift = 0.0;
-        let mut drag = 0.0;
-        let mut m_p = 0.0;
-        let mut alfa = 0.0;
-
-        if v2 > 0.0 {
-            let gamma = -(rigid_body.vy / v2.sqrt()).asin();
-            alfa = rigid_body.p + gamma;
-
-            lift = v2 / 2.0 * (CL0 + DCL * alfa);
-            drag = v2 / 2.0 * (CD0 + DCD * alfa);
-            m_p = -v2 / 2.0 * (DCMP * alfa + d);
-        }
-
-        let ax = t * alfa.cos() - drag * alfa.cos() + lift * alfa.sin();
-        let ay = t * alfa.sin() + drag * alfa.sin() + lift * alfa.cos() - MG;
-
-        let eps = m_p;
-
-        rigid_body.vx += ax * time.delta_seconds_f64();
-        rigid_body.vy += ay * time.delta_seconds_f64();
-
-        rigid_body.x += rigid_body.vx * time.delta_seconds_f64();
-        rigid_body.y += rigid_body.vy * time.delta_seconds_f64();
-
-        rigid_body.omega_p += eps * time.delta_seconds_f64();
-
-        rigid_body.p += rigid_body.omega_p * time.delta_seconds_f64();
-
-        if rigid_body.y < 5.0 {
-            rigid_body.y = 5.0;
-            rigid_body.vy = 0.0;
-        }
-
-        // println!(
-        //     "lift {}, drag {}, m_p {}, ax {}, ay {}, rigid_body {:?}",
-        //     lift, drag, m_p, ax, ay, rigid_body
-        // );
-
-        println!("{:?}", rigid_body);
+    let mut rigid_body = query.single_mut();
+    let mut tx = 0.0;
+    if keys.pressed(KeyCode::Space) {
+        tx += THRUST
     }
+
+    let mut delta = 0.0;
+    if keys.pressed(KeyCode::KeyW) {
+        delta += DELTA;
+    } else if keys.pressed(KeyCode::KeyS) {
+        delta -= DELTA;
+    }
+
+    // aerodynamic forces TODO
+    let fx = 0.0;
+    let fy = 0.0;
+    let fz = 0.0;
+
+    // aerodynamic moments TODO
+    let l = 0.0;
+    let m = 0.0;
+    let n = 0.0;
+
+    let u_dot = tx / M - G * rigid_body.theta.sin() - rigid_body.q * rigid_body.w
+        + rigid_body.r * rigid_body.v
+        + fx / M;
+
+    let v_dot = G * rigid_body.theta.cos() * rigid_body.phi.sin() - rigid_body.r * rigid_body.u
+        + rigid_body.p * rigid_body.w
+        + fy / M;
+
+    let w_dot = G * rigid_body.theta.cos() * rigid_body.phi.cos() - rigid_body.p * rigid_body.v
+        + rigid_body.q * rigid_body.u
+        + fz / M;
+
+    let p_dot = (n * I_XZ
+        + l * I_Z
+        + rigid_body.q * rigid_body.r * (I_Z * I_Z - I_Y * I_Z + I_XZ * I_XZ)
+        + rigid_body.p * rigid_body.q * (I_Y * I_XZ - I_X * I_XZ + I_Z * I_XZ))
+        / (I_X * I_Z - I_XZ * I_XZ);
+    let q_dot = (m
+        - rigid_body.r * rigid_body.q * (I_X - I_Z)
+        - I_XZ * (rigid_body.p * rigid_body.p - rigid_body.r * rigid_body.r))
+        / I_Y;
+    let r_dot = (n * I_X
+        + l * I_XZ
+        + rigid_body.q * rigid_body.r * (I_Y * I_XZ - I_Z * I_XZ - I_X * I_XZ)
+        + rigid_body.p * rigid_body.q * (I_XZ * I_XZ - I_Y * I_X + I_X * I_X))
+        / (I_X * I_Z - I_XZ * I_XZ);
+
+    rigid_body.u += u_dot * time.delta_seconds();
+    rigid_body.v += v_dot * time.delta_seconds();
+    rigid_body.w += w_dot * time.delta_seconds();
+    rigid_body.p += p_dot * time.delta_seconds();
+    rigid_body.q += q_dot * time.delta_seconds();
+    rigid_body.r += r_dot * time.delta_seconds();
+
+    let v = Vec3::new(rigid_body.u, rigid_body.v, rigid_body.w);
+    let rot = Quat::from_euler(
+        EulerRot::YXZ,
+        rigid_body.phi.to_radians(),
+        rigid_body.theta.to_radians(),
+        rigid_body.psi.to_radians(),
+    );
+
+    let rotated_v = rot.mul_vec3(v);
+
+    let x_dot = rotated_v.x;
+    let y_dot = rotated_v.y;
+    let z_dot = rotated_v.z;
+    let phi_dot = rigid_body.q * rigid_body.phi.cos() - rigid_body.r * rigid_body.phi.sin();
+    let theta_dot = rigid_body.p
+        + rigid_body.q * rigid_body.phi.sin() * rigid_body.theta.tan()
+        + rigid_body.r * rigid_body.phi.cos() * rigid_body.theta.tan();
+    let psi_dot = (rigid_body.q * rigid_body.phi.sin() + rigid_body.r * rigid_body.phi.cos())
+        / rigid_body.theta.cos();
+
+    rigid_body.x += x_dot * time.delta_seconds();
+    rigid_body.y += y_dot * time.delta_seconds();
+    rigid_body.z += z_dot * time.delta_seconds();
+    rigid_body.phi += phi_dot * time.delta_seconds();
+    rigid_body.theta += theta_dot * time.delta_seconds();
+    rigid_body.psi += psi_dot * time.delta_seconds();
 }
 
 fn update_transform(
@@ -229,18 +269,17 @@ fn update_transform(
     body_query: Query<&RigidBody, With<Airplane>>,
 ) {
     let body = body_query.single();
+    let mut transform = query.single_mut();
 
-    for mut transform in &mut query {
-        transform.translation.x = body.x as f32;
-        transform.translation.y = body.y as f32;
+    // TODO
+    transform.translation.x = body.x;
+    transform.translation.y = body.y;
 
-        println!("{}", transform.rotation);
+    println!("{}", transform.rotation);
 
-        *transform = transform.with_rotation(
-            Quat::from_rotation_z(body.p as f32)
-                * Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2),
-        )
-    }
+    *transform = transform.with_rotation(
+        Quat::from_rotation_z(body.p) * Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2),
+    )
 }
 
 fn update_camera(
@@ -248,21 +287,21 @@ fn update_camera(
     transform_query: Query<&Transform, With<Airplane>>,
 ) {
     let transform = transform_query.single();
+    let mut camera = query.single_mut();
 
-    for mut camera in &mut query {
-        camera.translation = transform.translation
-            - Vec3::new(
-                transform.up().x * 10.0,
-                transform.up().y * 10.0,
-                transform.up().z * 10.0,
-            )
-            + Vec3::new(
-                transform.left().x * 3.0,
-                transform.left().y * 3.0,
-                transform.left().z * 3.0,
-            );
-        *camera = camera.looking_at(transform.translation, transform.left());
-    }
+    // TODO
+    camera.translation = transform.translation
+        - Vec3::new(
+            transform.up().x * 10.0,
+            transform.up().y * 10.0,
+            transform.up().z * 10.0,
+        )
+        + Vec3::new(
+            transform.left().x * 3.0,
+            transform.left().y * 3.0,
+            transform.left().z * 3.0,
+        );
+    *camera = camera.looking_at(transform.translation, transform.left());
 }
 
 fn draw_axes(mut gizmos: Gizmos, query: Query<&Transform, With<Airplane>>) {
